@@ -1,0 +1,49 @@
+{:tasks
+ {:requires ([babashka.fs :as fs]
+             [clojure.string :as str])
+  :init (do (defn sh [& args]
+              (-> (apply shell {:out :string} args) :out str/trim))
+            (def image "user-image")
+            (def container "user-container")
+            (def ports {8000 "8080/tcp"})
+            (defn add-ports [ports]
+              (reduce-kv (fn [acc host-port container-port])
+                         (into acc ["-p" (str host-port ":" container-port)])
+                         [] ports)))
+
+  docker:build
+  {:doc "Build docker image"
+   :task
+   (let [args {"USERID" (sh "id" "-u")
+               "GROUPID" (sh "id" "-g")
+               "USERNAME" (sh "id" "-u" "-n")}]
+     (shell
+      "docker" "build" "-t" image
+      "-f" "devops/dockerfile"
+      "--build-arg" (str "USERID=" (args "USERID"))
+      "--build-arg" (str "GROUPID=" (args "GROUPID"))
+      "--build-arg" (str "USERNAME=" (args "USERNAME"))
+      "."))}
+
+  docker:run
+  {:doc "Run the created image"
+   :task
+   (let [args {"USERID" (sh "id" "-u")
+               "GROUPID" (sh "id" "-g")
+               "USERNAME" (sh "id" "-u" "-n")}
+         working-directory (sh "pwd")]
+     (apply shell
+            (concat
+             ["docker" "run" "-td" "--name" container
+              "--rm"
+              "--ipc=host"
+              ;; "--network=host"
+              "-u" (str (args "USERID") ":"(args "USERGROUP"))
+              "-v" (str working-directory ":/home/" (args "USERNAME") "/app")
+              "-w" (str "/home/" (args "USERNAME")  "/app")])
+            (add-ports ports)
+            [image "/bin/bash"]))}
+
+  docker:clean
+  {:doc "Clean container"
+   :task (shell "docker" "stop" container)}}}

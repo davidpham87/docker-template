@@ -1,0 +1,37 @@
+{:tasks
+ {:requires ([babashka.fs :as fs]
+             [clojure.edn]
+             [clojure.tools.cli :refer [parse-opts]]
+             [clojure.pprint :refer (pprint)])
+
+  :init (do (defn env [s] (System/getenv s))
+
+            (def defaults {:port 8083 :target "http://localhost:8052/api"
+                           :tag "native-test"})
+
+            (def cli-opts
+              [["-p" "--port PORT" "Port number" :parse-fn (fn [x] (Integer/parseInt x))]
+               ["-t" "--tag TAG" "Tag"]
+               ["-c" "--config CONFIG" "Config for arguments"]
+               ["-h" "--help" "Show this help"]])
+
+            (def cli-args  (parse-opts *command-line-args* cli-opts))
+
+            (def args (let [options (:options cli-args)]
+                        (if-let [c (:config options)]
+                          (-> c slurp clojure.edn/read-string (as-> $ (merge defaults $ options)))
+                          (merge defaults options))))
+
+            (pprint args))
+
+  summary {:doc "Show the possible arguments for the tasks."
+           :task (println (:summary cli-args))}
+
+  dev {:doc "Dev. Run a local repl."
+       :task (clojure "-M:repl")}
+
+  depstar {:doc  "Create an uberjar."
+           :task (clojure "-X:depstar")}
+
+  jar-run {:doc  "Run the app.jar"
+           :task (shell "java" "-jar" "app.jar" "-p" (:port args) "-t" (:target args))}}}

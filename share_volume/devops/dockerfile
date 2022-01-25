@@ -1,0 +1,27 @@
+FROM computesoftware/zulu-openjdk-11:dev-utils-intel-mkl-2018.4-057-tools-deps-1.10.3.981-0e524d1 as ocio-backend
+
+USER root
+
+EXPOSE 8051
+EXPOSE 8888
+
+ARG USERID
+ARG GROUPID
+ARG USERNAME
+
+RUN rm -r /home/$(id -nu $USERID) || true
+RUN userdel $(id -nu $USERID) || true
+
+RUN groupadd -g $GROUPID $USERNAME
+RUN useradd --create-home -u $USERID -g $GROUPID $USERNAME
+
+USER $USERNAME
+RUN mkdir /home/$USERNAME/app
+WORKDIR /home/$USERNAME/app
+
+WORKDIR /home/$USERNAME
+RUN echo '{:bind "0.0.0.0" :port 8888}' > ~/.nrepl.edn
+
+COPY deps.edn .
+
+RUN clojure -Spath
