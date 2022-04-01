@@ -1,17 +1,39 @@
 {:tasks
  {:requires ([babashka.fs :as fs]
+             [babashka.process :as bp]
+             [selmer.parser :as sp]
+             [clojure.string :as str]
              [clojure.edn]
              [clojure.tools.cli :refer [parse-opts]]
              [clojure.pprint :refer (pprint)])
 
   :init (do (defn env [s] (System/getenv s))
 
+            (defn ->sh [cmd] (str/trim (:out (bp/sh cmd))))
+            (def user
+              {:username (->sh "id -nu")
+               :uid (->sh "id -u")
+               :gid (->sh "id -g")})
+
             (def defaults {:port 8083 :target "http://localhost:8052/api"
-                           :tag "native-test"})
+                           :tag "cljpyr"
+                           :image "cimg/clojure:1.10-node"})
+
+            (defn ->docker-img-user [{:keys [image tag]}]
+              (let [cmd (sp/render
+                         (str "docker build -t {{tag}} "
+                              "--build-arg USER_ID={{uid}} "
+                              "--build-arg GROUP_ID={{gid}} "
+                              "--build-arg USERNAME={{username}} "
+                              "--build-arg IMAGE={{image}} .")
+                         (merge user {:tag tag :image image}))]
+                (println cmd)
+                cmd))
 
             (def cli-opts
               [["-p" "--port PORT" "Port number" :parse-fn (fn [x] (Integer/parseInt x))]
                ["-t" "--tag TAG" "Tag"]
+               ["-i" "--image IMAGE" "Image"]
                ["-c" "--config CONFIG" "Config for arguments"]
                ["-h" "--help" "Show this help"]])
 
@@ -24,8 +46,53 @@
 
             (pprint args))
 
+  echo {:doc "Print arguments"
+        :task (do (pprint user))}
+
   summary {:doc "Show the possible arguments for the tasks."
            :task (println (:summary cli-args))}
+
+  cljpyr:base
+  {:doc "Create an user friendly image"
+   :task (shell {:dir "user"}
+                (->docker-img-user {:image "behrica/clj-py-r:1.7.0" :tag "cljpyr"}))}
+
+  docker:bash
+  {:doc "Execute a bash in container"
+   :task
+   (let [cmd (sp/render "docker exec -it {{tag}} /bin/bash" args)] (shell cmd))}
+
+  clj:repl
+  {:doc "Execute a clojure nrepl"
+   :task
+   (let [cmd (sp/render "docker exec -it {{tag}} clojure -M:cider-repl" args)] (shell cmd))}
+
+  clj:py-repl
+  {:doc "Execute a bash in container"
+   :task
+   (let [cmd (sp/render "docker exec -it {{tag}} python " args)] (shell cmd))}
+
+  py:repl
+  {:doc "Execute a bash in container"
+   :task
+   (let [cmd (sp/render
+              (str "docker exec -it {{tag}} "
+                   "python -m ipykernel_launcher -f {{config-file}} ") args)]
+     (shell cmd))}
+
+  docker-run
+  {:doc "Create an user friendly image"
+   :task
+   (let [cmd (sp/render
+              (str "docker run -td --name {{tag}} "
+                   "--rm  --ipc=host  --network=host  "
+                   "-v {{pwd}}:/home/{{username}} "
+                   " -w /home/{{username}}/app  "
+                   "--cpus {{cpus}}  "
+                   "{{tag}} /bin/bash")
+              (merge args user {:cpus (->sh "grep -c processor /proc/cpuinfo")}))]
+     (shell cmd))}
+
 
   dev {:doc "Dev. Run a local repl."
        :task (clojure "-M:repl")}
